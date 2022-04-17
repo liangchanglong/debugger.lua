@@ -101,12 +101,12 @@ local function dbg_writeln(str, ...)
 	end
 end
 
-local function format_loc(file, line) return COLOR_BLUE..file..COLOR_RESET..":"..COLOR_YELLOW..line..COLOR_RESET end
+local function format_loc(file, line) return COLOR_YELLOW..file..COLOR_RESET..":"..COLOR_YELLOW..line..COLOR_RESET end
 local function format_stack_frame_info(info)
 	local filename = info.source:match("@(.*)")
 	local source = filename and dbg.shorten_path(filename) or info.short_src
 	local namewhat = (info.namewhat == "" and "chunk at" or info.namewhat)
-	local name = (info.name and "'"..COLOR_BLUE..info.name..COLOR_RESET.."'" or format_loc(source, info.linedefined))
+	local name = (info.name and "'"..COLOR_YELLOW..info.name..COLOR_RESET.."'" or format_loc(source, info.linedefined))
 	return format_loc(source, info.currentline).." in "..namewhat.." "..name
 end
 
@@ -294,10 +294,45 @@ local function cmd_print(expr)
 		end
 		
 		if output == "" then output = "<no result>" end
-		dbg_writeln(COLOR_BLUE..expr.. GREEN_CARET..output)
+		dbg_writeln(COLOR_YELLOW..expr.. GREEN_CARET..output)
 	end
 	
 	return false
+end
+
+local breakInfo = {}
+
+local function split(str, reps)
+    local resultStrList = {}
+    string.gsub(str,'[^'..reps..']+', function ( w )
+        table.insert(resultStrList,w)
+    end)
+    return resultStrList
+end
+
+local function hookBreakPoint(offset)
+    return function(event, line)
+        if event == "line" then
+            local info = debug.getinfo(2, "nlS")
+            local file = info.short_src:sub(1,-5)
+            if (breakInfo[file..":"..info.currentline]) then
+                top_offset = offset
+                stack_inspect_offset = top_offset
+                stack_top = top_offset
+                repl(": "..file..":"..info.currentline)
+            end
+        end
+    end
+end
+
+local function cmd_break(expr)
+    local res = split(expr, ':')
+    if #res < 2 then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."parse breakpoint format failed!") return false end
+    if not package.searchpath(res[1], package.path) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."not found file \""..res[1].."\"") return false end
+    if not tonumber(res[2]) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." "..res[2].." is not number") return false end
+    breakInfo[expr] = {file = res[1], line=tonumber(res[2])}
+    dbg_writeln("add breakpoint: "..expr)
+    return false
 end
 
 local function cmd_eval(code)
@@ -425,11 +460,12 @@ end
 local last_cmd = false
 
 local commands = {
-	["^c$"] = function() return true end,
+	["^c$"] = function() return true, hookBreakPoint end,
 	["^s$"] = cmd_step,
 	["^n$"] = cmd_next,
 	["^f$"] = cmd_finish,
 	["^p%s+(.*)$"] = cmd_print,
+	["^b%s+(.*)$"] = cmd_break,
 	["^e%s+(.*)$"] = cmd_eval,
 	["^u$"] = cmd_up,
 	["^d$"] = cmd_down,
@@ -476,17 +512,17 @@ repl = function(reason)
 	end
 	
 	local info = debug.getinfo(stack_inspect_offset + CMD_STACK_LEVEL - 3)
-	reason = reason and (COLOR_YELLOW.."break via "..COLOR_RED..reason..GREEN_CARET) or ""
+	reason = reason and (COLOR_YELLOW.."break via "..COLOR_GRAY..reason..GREEN_CARET) or ""
 	dbg_writeln(reason..format_stack_frame_info(info))
 	
 	if tonumber(dbg.auto_where) then where(info, dbg.auto_where) end
 	
 	repeat
-		local success, done, hook = pcall(run_command, dbg.read(COLOR_RED.."debugger.lua> "..COLOR_RESET))
-		if success then
-			debug.sethook(hook and hook(0), "crl")
-		else
-			local message = COLOR_RED.."INTERNAL DEBUGGER.LUA ERROR. ABORTING\n:"..COLOR_RESET.." "..done
+		local success, done, hook = pcall(run_command, dbg.read(COLOR_GRAY.."debugger.lua> "..COLOR_RESET))
+        if success then
+            debug.sethook(hook and hook(0), "crl")
+        else
+            local message = COLOR_RED.."INTERNAL DEBUGGER.LUA ERROR. ABORTING\n:"..COLOR_RESET.." "..done
 			dbg_writeln(message)
 			error(message)
 		end
