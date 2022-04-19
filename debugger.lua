@@ -300,7 +300,9 @@ local function cmd_print(expr)
 	return false
 end
 
-local breakInfo = {}
+local breakInfo = {curId = 0}
+breakInfo.ids = {}  -- <breakpoint ID, breakpoint name>
+breakInfo.infos = {} -- <breakpoint name, breakpoint ID>
 
 local function split(str, reps)
     local resultStrList = {}
@@ -314,26 +316,84 @@ local function hookBreakPoint(offset)
     return function(event, line)
         if event == "line" then
             local info = debug.getinfo(2, "nlS")
-            local file = info.short_src:sub(1,-5)
-            if (breakInfo[file..":"..info.currentline]) then
+            local file = info.short_src:match("(%a+.*)%.lua"):gsub("/",".")
+            local breakpointName = file..":"..info.currentline
+            if (breakInfo.infos[breakpointName]) then
                 top_offset = offset
                 stack_inspect_offset = top_offset
                 stack_top = top_offset
-                repl(": "..file..":"..info.currentline)
+                repl(breakInfo.infos[breakpointName].." ("..breakpointName..")")
             end
         end
     end
 end
 
 local function cmd_break(expr)
-    local res = split(expr, ':')
-    if #res < 2 then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."parse breakpoint format failed!") return false end
-    if not package.searchpath(res[1], package.path) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."not found file \""..res[1].."\"") return false end
-    if not tonumber(res[2]) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." "..res[2].." is not number") return false end
-    breakInfo[expr] = {file = res[1], line=tonumber(res[2])}
-    dbg_writeln("add breakpoint: "..expr)
+    local line = tonumber(expr)
+    if (line) then  -- 在当前文件指定行加断点
+        local info = debug.getinfo(CMD_STACK_LEVEL, "nlS")
+        local file = info.short_src:match("(%a+.*)%.lua"):gsub("/",".")
+        local breakpointName = file..":"..line
+
+        breakInfo.curId = breakInfo.curId + 1
+        breakInfo.infos[breakpointName] = breakInfo.curId
+        breakInfo.ids[breakInfo.curId] = breakpointName
+        dbg_writeln("add breakpoint: "..breakInfo.curId.." ("..breakpointName..")")
+    else -- 在指定文件指定行加断点
+        local res = split(expr, ':')
+        if #res < 2 then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."parse breakpoint format failed!") return false end
+        if not package.searchpath(res[1], package.path) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."not found file \""..res[1].."\"") return false end
+        if not tonumber(res[2]) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." "..res[2].." is not number") return false end
+
+        breakInfo.curId = breakInfo.curId + 1
+        breakInfo.infos[expr] = breakInfo.curId
+        breakInfo.ids[breakInfo.curId] = expr
+        dbg_writeln("add breakpoint: "..breakInfo.curId.." ("..expr..")")
+    end
+
     return false
 end
+
+local function cmd_del_break(expr)
+    local id = tonumber(expr)
+    if (not id or not breakInfo.ids[id]) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."not found breakpoint \'"..expr.."\'") return false end
+
+    local breakpointName = breakInfo.ids[id]
+    breakInfo.infos[breakpointName] = nil
+    breakInfo.ids[id] = nil
+    dbg_writeln("del breakpoint: \'"..expr.."\' ("..breakpointName..")")
+    return false
+end
+
+local function cmd_breakpoints()
+    if (not next(breakInfo.ids)) then
+        dbg_writeln(COLOR_YELLOW.."  no breakpoints.")
+        return
+    end
+
+    dbg_writeln(COLOR_YELLOW.."breakpoints:"..COLOR_RESET)
+    for id,name in pairs(breakInfo.ids) do
+        dbg_writeln("\t"..id.."  (" .. name .. ")")
+    end
+end
+
+local function cmd_frame(expr)
+    local frameId = tonumber(expr)
+    if (not frameId) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."not found frame \'"..expr.."\'") return false end
+    local info = debug.getinfo(frameId + CMD_STACK_LEVEL)
+
+	if info then
+		stack_inspect_offset = frameId
+		dbg_writeln("Inspecting frame: "..format_stack_frame_info(info))
+		if dbg.auto_where then where(info, dbg.auto_where) end
+	else
+		info = debug.getinfo(stack_inspect_offset + CMD_STACK_LEVEL)
+		dbg_writeln("Already at the bottom of the stack.")
+	end
+	
+	return false
+end
+
 
 local function cmd_eval(code)
 	local env = local_bindings(1, true)
@@ -366,7 +426,7 @@ local function cmd_down()
 	if info then
 		stack_inspect_offset = offset
 		dbg_writeln("Inspecting frame: "..format_stack_frame_info(info))
-		if tonumber(dbg.auto_where) then where(info, dbg.auto_where) end
+		if dbg.auto_where then where(info, dbg.auto_where) end
 	else
 		info = debug.getinfo(stack_inspect_offset + CMD_STACK_LEVEL)
 		dbg_writeln("Already at the bottom of the stack.")
@@ -388,7 +448,7 @@ local function cmd_up()
 	if info then
 		stack_inspect_offset = offset
 		dbg_writeln("Inspecting frame: "..format_stack_frame_info(info))
-		if tonumber(dbg.auto_where) then where(info, dbg.auto_where) end
+		if dbg.auto_where then where(info, dbg.auto_where) end
 	else
 		info = debug.getinfo(stack_inspect_offset + CMD_STACK_LEVEL)
 		dbg_writeln("Already at the top of the stack.")
@@ -440,19 +500,23 @@ end
 local function cmd_help()
 	dbg.write(""
 		.. COLOR_BLUE.."  <return>"..GREEN_CARET.."re-run last command\n"
-		.. COLOR_BLUE.."  c"..COLOR_YELLOW.."(ontinue)"..GREEN_CARET.."continue execution\n"
-		.. COLOR_BLUE.."  s"..COLOR_YELLOW.."(tep)"..GREEN_CARET.."step forward by one line (into functions)\n"
-		.. COLOR_BLUE.."  n"..COLOR_YELLOW.."(ext)"..GREEN_CARET.."step forward by one line (skipping over functions)\n"
-		.. COLOR_BLUE.."  f"..COLOR_YELLOW.."(inish)"..GREEN_CARET.."step forward until exiting the current function\n"
-		.. COLOR_BLUE.."  u"..COLOR_YELLOW.."(p)"..GREEN_CARET.."move up the stack by one frame\n"
-		.. COLOR_BLUE.."  d"..COLOR_YELLOW.."(own)"..GREEN_CARET.."move down the stack by one frame\n"
-		.. COLOR_BLUE.."  w"..COLOR_YELLOW.."(here) "..COLOR_BLUE.."[line count]"..GREEN_CARET.."print source code around the current line\n"
-		.. COLOR_BLUE.."  e"..COLOR_YELLOW.."(val) "..COLOR_BLUE.."[statement]"..GREEN_CARET.."execute the statement\n"
-		.. COLOR_BLUE.."  p"..COLOR_YELLOW.."(rint) "..COLOR_BLUE.."[expression]"..GREEN_CARET.."execute the expression and print the result\n"
-		.. COLOR_BLUE.."  t"..COLOR_YELLOW.."(race)"..GREEN_CARET.."print the stack trace\n"
-		.. COLOR_BLUE.."  l"..COLOR_YELLOW.."(ocals)"..GREEN_CARET.."print the function arguments, locals and upvalues.\n"
-		.. COLOR_BLUE.."  h"..COLOR_YELLOW.."(elp)"..GREEN_CARET.."print this message\n"
-		.. COLOR_BLUE.."  q"..COLOR_YELLOW.."(uit)"..GREEN_CARET.."halt execution\n"
+		.. COLOR_BLUE.."  c "..COLOR_YELLOW.."(continue)"..GREEN_CARET.."continue execution\n"
+		.. COLOR_BLUE.."  s "..COLOR_YELLOW.."(step)"..GREEN_CARET.."step forward by one line (into functions)\n"
+		.. COLOR_BLUE.."  n "..COLOR_YELLOW.."(next)"..GREEN_CARET.."step forward by one line (skipping over functions)\n"
+		.. COLOR_BLUE.."  e "..COLOR_YELLOW.."(end)"..GREEN_CARET.."step forward until exiting the current function\n"
+		.. COLOR_BLUE.."  up "..COLOR_YELLOW.."(up frame)"..GREEN_CARET.."move up the stack by one frame\n"
+		.. COLOR_BLUE.."  down "..COLOR_YELLOW.."(down frame)"..GREEN_CARET.."move down the stack by one frame\n"
+		.. COLOR_BLUE.."  w "..COLOR_YELLOW.."(where) "..COLOR_BLUE.."[line count]"..GREEN_CARET.."print source code around the current line\n"
+		--.. COLOR_BLUE.."  e"..COLOR_YELLOW.."(val) "..COLOR_BLUE.."[statement]"..GREEN_CARET.."execute the statement\n"
+		.. COLOR_BLUE.."  p "..COLOR_YELLOW.."(print) "..COLOR_BLUE.."[expression]"..GREEN_CARET.."execute the expression and print the result\n"
+		.. COLOR_BLUE.."  b "..COLOR_YELLOW.."(breakpoint) "..COLOR_BLUE.."[line or package:line]"..GREEN_CARET.."set a breakpoint at the specified line of the current package or at the specified line of the specified package\n"
+		.. COLOR_BLUE.."  del "..COLOR_YELLOW.."(delete breakpoint)"..COLOR_BLUE.."[breakpoint Id]"..GREEN_CARET.."delete breakpoint by Id\n"
+		.. COLOR_BLUE.."  bps "..COLOR_YELLOW.."(breakpoints)"..GREEN_CARET.."show all breakpoints\n"
+		.. COLOR_BLUE.."  f "..COLOR_YELLOW.."(frame)"..COLOR_BLUE.."[frame Id]"..GREEN_CARET.."move the stack by frame Id\n"
+		.. COLOR_BLUE.."  bt "..COLOR_YELLOW.."(backtrace)"..GREEN_CARET.."print the stack trace\n"
+		.. COLOR_BLUE.."  l "..COLOR_YELLOW.."(locals)"..GREEN_CARET.."print the function arguments, locals and upvalues.\n"
+		.. COLOR_BLUE.."  h "..COLOR_YELLOW.."(help)"..GREEN_CARET.."print this message\n"
+		.. COLOR_BLUE.."  q "..COLOR_YELLOW.."(quit)"..GREEN_CARET.."halt execution\n"
 	)
 	return false
 end
@@ -463,14 +527,17 @@ local commands = {
 	["^c$"] = function() return true, hookBreakPoint end,
 	["^s$"] = cmd_step,
 	["^n$"] = cmd_next,
-	["^f$"] = cmd_finish,
+	["^e$"] = cmd_finish,
+	["^up$"] = cmd_up,
+	["^down$"] = cmd_down,
+	["^w%s*(%d*)$"] = cmd_where,
 	["^p%s+(.*)$"] = cmd_print,
 	["^b%s+(.*)$"] = cmd_break,
-	["^e%s+(.*)$"] = cmd_eval,
-	["^u$"] = cmd_up,
-	["^d$"] = cmd_down,
-	["^w%s*(%d*)$"] = cmd_where,
-	["^t$"] = cmd_trace,
+	["^del%s+(.*)$"] = cmd_del_break,
+	["^bps$"] = cmd_breakpoints,
+	["^f%s+(.*)$"] = cmd_frame,
+	--["^e%s+(.*)$"] = cmd_eval,
+	["^bt$"] = cmd_trace,
 	["^l$"] = cmd_locals,
 	["^h$"] = cmd_help,
 	["^q$"] = function() dbg.exit(0); return true end,
@@ -512,10 +579,10 @@ repl = function(reason)
 	end
 	
 	local info = debug.getinfo(stack_inspect_offset + CMD_STACK_LEVEL - 3)
-	reason = reason and (COLOR_YELLOW.."break via "..COLOR_GRAY..reason..GREEN_CARET) or ""
+	reason = reason and (COLOR_YELLOW.."current breakpoint: "..COLOR_GRAY..reason..GREEN_CARET) or ""
 	dbg_writeln(reason..format_stack_frame_info(info))
 	
-	if tonumber(dbg.auto_where) then where(info, dbg.auto_where) end
+	if dbg.auto_where then where(info, dbg.auto_where) end
 	
 	repeat
 		local success, done, hook = pcall(run_command, dbg.read(COLOR_GRAY.."debugger.lua> "..COLOR_RESET))

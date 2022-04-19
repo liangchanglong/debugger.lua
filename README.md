@@ -57,19 +57,23 @@ Debugger Commands:
 
 If you have used other CLI debuggers, debugger.lua shouldn't be surprising. I didn't make a fancy parser, so the commands are just single letters. Since the debugger is pretty simple there are only a small handful of commands anwyay.
 
-	[return] - re-run last command
-	c(ontinue) - contiue execution
-	s(tep) - step forward by one line (into functions)
-	n(ext) - step forward by one line (skipping over functions)
-	p(rint) [expression] - execute the expression and print the result
-	f(inish) - step forward until exiting the current function
-	u(p) - move up the stack by one frame
-	d(own) - move down the stack by one frame
-	w(here) [line count] - print source code around the current line
-	t(race) - print the stack trace
-	l(ocals) - print the function arguments, locals and upvalues.
-	h(elp) - print this message
-	q(uit) - halt execution
+    <return> => re-run last command
+    c (continue) => continue execution
+    s (step) => step forward by one line (into functions)
+    n (next) => step forward by one line (skipping over functions)
+    e (end) => step forward until exiting the current function
+    up (up frame) => move up the stack by one frame
+    down (down frame) => move down the stack by one frame
+    w (where) [line count] => print source code around the current line
+    p (print) [expression] => execute the expression and print the result
+    b (breakpoint) [line or package:line] => set a breakpoint at the specified line of the current package or at the specified line of the specified package
+    del (delete breakpoint)[breakpoint Id] => delete breakpoint by Id
+    bps (breakpoints) => show all breakpoints
+    f (frame)[frame Id] => move the stack by frame Id
+    bt (backtrace) => print the stack trace
+    l (locals) => print the function arguments, locals and upvalues.
+    h (help) => print this message
+    q (quit) => halt execution	
 
 If you've never used a command line debugger before, start a nice warm cozy fire, run tutorial.lua, and open it up in your favorite editor so you can follow along.
 
