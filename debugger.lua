@@ -260,6 +260,16 @@ end
 local unpack = unpack or table.unpack
 local pack = function(...) return {n = select("#", ...), ...} end
 
+local function exec_code(code)
+    local env = local_bindings(1, true)
+    local chunk = compile_chunk("return "..code, env)
+    if chunk == nil then return false end
+
+    -- Call the chunk and collect the results.
+    local results = pack(pcall(chunk, unpack(rawget(env, "...") or {})))
+    return results[2]
+end
+
 local function cmd_step()
 	stack_inspect_offset = stack_top
 	return true, hook_step
@@ -314,21 +324,34 @@ end
 
 local function hookBreakPoint(offset)
     return function(event, line)
+        -- no breakpoints return
+        if (not next(breakInfo.ids)) then
+            return
+        end
         if event == "line" then
             local info = debug.getinfo(2, "nlS")
             local file = info.short_src:match("(%a+.*)%.lua"):gsub("/",".")
             local breakpointName = file..":"..info.currentline
-            if (breakInfo.infos[breakpointName]) then
+            local breakpoint = breakInfo.infos[breakpointName]
+            if (breakpoint) then
+                if (breakpoint.condition and not exec_code(breakpoint.condition)) then
+                    return
+                end
                 top_offset = offset
                 stack_inspect_offset = top_offset
                 stack_top = top_offset
-                repl(breakInfo.infos[breakpointName].." ("..breakpointName..")")
+                repl(breakInfo.infos[breakpointName].id .." ("..breakpointName..")")
             end
         end
     end
 end
 
 local function cmd_break(expr)
+    local condition = nil
+    if (expr:find("if")) then -- 条件断点
+        condition = expr:match("if%s+(.*)")
+        expr = split(expr, "if")[1]
+    end
     local line = tonumber(expr)
     if (line) then  -- 在当前文件指定行加断点
         local info = debug.getinfo(CMD_STACK_LEVEL, "nlS")
@@ -336,7 +359,7 @@ local function cmd_break(expr)
         local breakpointName = file..":"..line
 
         breakInfo.curId = breakInfo.curId + 1
-        breakInfo.infos[breakpointName] = breakInfo.curId
+        breakInfo.infos[breakpointName] = {id = breakInfo.curId, condition = condition}
         breakInfo.ids[breakInfo.curId] = breakpointName
         dbg_writeln("add breakpoint: "..breakInfo.curId.." ("..breakpointName..")")
     else -- 在指定文件指定行加断点
@@ -346,7 +369,7 @@ local function cmd_break(expr)
         if not tonumber(res[2]) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." "..res[2].." is not number") return false end
 
         breakInfo.curId = breakInfo.curId + 1
-        breakInfo.infos[expr] = breakInfo.curId
+        breakInfo.infos[expr] = {id = breakInfo.curId, condition = condition}
         breakInfo.ids[breakInfo.curId] = expr
         dbg_writeln("add breakpoint: "..breakInfo.curId.." ("..expr..")")
     end
@@ -512,6 +535,7 @@ local function cmd_help()
 		.. COLOR_BLUE.."  b "..COLOR_YELLOW.."(breakpoint) "..COLOR_BLUE.."[line or package:line]"..GREEN_CARET.."set a breakpoint at the specified line of the current package or at the specified line of the specified package\n"
 		.. COLOR_BLUE.."  del "..COLOR_YELLOW.."(delete breakpoint)"..COLOR_BLUE.."[breakpoint Id]"..GREEN_CARET.."delete breakpoint by Id\n"
 		.. COLOR_BLUE.."  bps "..COLOR_YELLOW.."(breakpoints)"..GREEN_CARET.."show all breakpoints\n"
+		.. COLOR_BLUE.."  exec "..COLOR_YELLOW.."(execute) "..COLOR_BLUE.."[expression]"..GREEN_CARET.."execute the expression\n"
 		.. COLOR_BLUE.."  f "..COLOR_YELLOW.."(frame)"..COLOR_BLUE.."[frame Id]"..GREEN_CARET.."move the stack by frame Id\n"
 		.. COLOR_BLUE.."  bt "..COLOR_YELLOW.."(backtrace)"..GREEN_CARET.."print the stack trace\n"
 		.. COLOR_BLUE.."  l "..COLOR_YELLOW.."(locals)"..GREEN_CARET.."print the function arguments, locals and upvalues.\n"
@@ -536,7 +560,7 @@ local commands = {
 	["^del%s+(.*)$"] = cmd_del_break,
 	["^bps$"] = cmd_breakpoints,
 	["^f%s+(.*)$"] = cmd_frame,
-	--["^e%s+(.*)$"] = cmd_eval,
+    ["^exec%s+(.*)$"] = cmd_eval,
 	["^bt$"] = cmd_trace,
 	["^l$"] = cmd_locals,
 	["^h$"] = cmd_help,
