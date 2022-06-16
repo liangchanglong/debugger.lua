@@ -261,13 +261,13 @@ local unpack = unpack or table.unpack
 local pack = function(...) return {n = select("#", ...), ...} end
 
 local function exec_code(code)
-    local env = local_bindings(1, true)
+    local env = local_bindings(-2, true)
     local chunk = compile_chunk("return "..code, env)
     if chunk == nil then return false end
 
     -- Call the chunk and collect the results.
     local results = pack(pcall(chunk, unpack(rawget(env, "...") or {})))
-    return results[2]
+    return results[1] and results[2]
 end
 
 local function cmd_step()
@@ -363,6 +363,8 @@ local function cmd_break(expr)
         breakInfo.ids[breakInfo.curId] = breakpointName
         dbg_writeln("add breakpoint: "..breakInfo.curId.." ("..breakpointName..")")
     else -- 在指定文件指定行加断点
+        -- 去除收尾空白字符
+        expr = string.gsub(expr, "^%s*(.-)%s*$", "%1")
         local res = split(expr, ':')
         if #res < 2 then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."parse breakpoint format failed!") return false end
         if not package.searchpath(res[1], package.path) then dbg_writeln(COLOR_RED.."Error:"..COLOR_RESET.." ".."not found file \""..res[1].."\"") return false end
@@ -531,12 +533,12 @@ local function cmd_help()
 		.. COLOR_BLUE.."  down "..COLOR_YELLOW.."(down frame)"..GREEN_CARET.."move down the stack by one frame\n"
 		.. COLOR_BLUE.."  w "..COLOR_YELLOW.."(where) "..COLOR_BLUE.."[line count]"..GREEN_CARET.."print source code around the current line\n"
 		--.. COLOR_BLUE.."  e"..COLOR_YELLOW.."(val) "..COLOR_BLUE.."[statement]"..GREEN_CARET.."execute the statement\n"
-		.. COLOR_BLUE.."  p "..COLOR_YELLOW.."(print) "..COLOR_BLUE.."<expression>"..GREEN_CARET.."execute the expression and print the result\n"
-		.. COLOR_BLUE.."  b "..COLOR_YELLOW.."(breakpoint) "..COLOR_BLUE.."<line or package:line> [if condition]"..GREEN_CARET.."set a breakpoint at the specified line of the current package or at the specified line of the specified package\n"
-		.. COLOR_BLUE.."  del "..COLOR_YELLOW.."(delete breakpoint)"..COLOR_BLUE.."<breakpoint Id>"..GREEN_CARET.."delete breakpoint by Id\n"
+		.. COLOR_BLUE.."  p "..COLOR_YELLOW.."(print) "..COLOR_BLUE.."[expression]"..GREEN_CARET.."execute the expression and print the result\n"
+		.. COLOR_BLUE.."  b "..COLOR_YELLOW.."(breakpoint) "..COLOR_BLUE.."[line or package:line]"..GREEN_CARET.."set a breakpoint at the specified line of the current package or at the specified line of the specified package\n"
+		.. COLOR_BLUE.."  del "..COLOR_YELLOW.."(delete breakpoint)"..COLOR_BLUE.."[breakpoint Id]"..GREEN_CARET.."delete breakpoint by Id\n"
 		.. COLOR_BLUE.."  bps "..COLOR_YELLOW.."(breakpoints)"..GREEN_CARET.."show all breakpoints\n"
-		.. COLOR_BLUE.."  exec "..COLOR_YELLOW.."(execute) "..COLOR_BLUE.."<expression>"..GREEN_CARET.."execute the expression\n"
-		.. COLOR_BLUE.."  f "..COLOR_YELLOW.."(frame)"..COLOR_BLUE.."<frame Id>"..GREEN_CARET.."move the stack by frame Id\n"
+		.. COLOR_BLUE.."  exec "..COLOR_YELLOW.."(execute) "..COLOR_BLUE.."[expression]"..GREEN_CARET.."execute the expression\n"
+		.. COLOR_BLUE.."  f "..COLOR_YELLOW.."(frame)"..COLOR_BLUE.."[frame Id]"..GREEN_CARET.."move the stack by frame Id\n"
 		.. COLOR_BLUE.."  bt "..COLOR_YELLOW.."(backtrace)"..GREEN_CARET.."print the stack trace\n"
 		.. COLOR_BLUE.."  l "..COLOR_YELLOW.."(locals)"..GREEN_CARET.."print the function arguments, locals and upvalues.\n"
 		.. COLOR_BLUE.."  h "..COLOR_YELLOW.."(help)"..GREEN_CARET.."print this message\n"
